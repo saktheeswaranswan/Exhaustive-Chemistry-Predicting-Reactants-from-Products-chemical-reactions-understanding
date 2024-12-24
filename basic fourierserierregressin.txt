@@ -1,0 +1,135 @@
+let data = [];
+let button;
+
+function setup() {
+  createCanvas(400, 200);
+  generateData(100); // Generate 100 data points
+  createDownloadButton();
+}
+
+function draw() {
+  background(30);
+  fill(255);
+  textSize(16);
+  text("CSV File Generator", 20, 30);
+  text("Click the button below to download 'rt.csv'", 20, 60);
+}
+
+function generateData(numPoints) {
+  for (let i = 0; i < numPoints; i++) {
+    let x = i;
+    let y = random(-1, 1); // Random `y` values
+    data.push({ x, y });
+  }
+}
+
+function createDownloadButton() {
+  button = createButton('Download rt.csv');
+  button.position(20, height + 20);
+  button.mousePressed(downloadCSV);
+}
+
+function downloadCSV() {
+  let csvContent = "x,y\n";
+  for (let point of data) {
+    csvContent += `${point.x},${point.y}\n`;
+  }
+  let blob = new Blob([csvContent], { type: 'text/csv' });
+  let url = URL.createObjectURL(blob);
+  let a = createA(url, 'Download CSV', '_blank');
+  a.download = "rt.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+let uploadedData = [];
+let coefficients = [];
+let slider;
+
+function setup() {
+  createCanvas(800, 400);
+  createFileInput(handleFileUpload); // File upload button
+  slider = createSlider(1, 1000, 1, 1); // Slider for harmonics
+  slider.position(20, height + 20);
+  textSize(16);
+}
+
+function draw() {
+  background(30);
+  fill(255);
+  text("Fourier Regression", 20, 30);
+  if (uploadedData.length > 0) {
+    text("Harmonics: " + slider.value(), 20, 60);
+    drawOriginalData();
+    drawFourierApproximation(slider.value());
+  } else {
+    text("Upload 'rt.csv' to compute Fourier Regression", 20, 60);
+  }
+}
+
+function handleFileUpload(file) {
+  if (file.subtype === 'csv') {
+    let rows = file.data.split('\n');
+    uploadedData = [];
+    rows.slice(1).forEach(row => {
+      let [x, y] = row.split(',').map(Number);
+      if (!isNaN(x) && !isNaN(y)) {
+        uploadedData.push({ x, y });
+      }
+    });
+    computeFourierCoefficients(1000);
+  } else {
+    console.error("Please upload a valid CSV file.");
+  }
+}
+
+function computeFourierCoefficients(maxHarmonics) {
+  let M = uploadedData.length;
+  let P = M;
+  coefficients = [];
+  let a0 = uploadedData.reduce((sum, point) => sum + point.y, 0) / M;
+  coefficients.push({ a0, an: [], bn: [] });
+  for (let n = 1; n <= maxHarmonics; n++) {
+    let an = 0, bn = 0;
+    for (let i = 0; i < M; i++) {
+      let angle = (2 * PI * n * uploadedData[i].x) / P;
+      an += uploadedData[i].y * cos(angle);
+      bn += uploadedData[i].y * sin(angle);
+    }
+    coefficients.push({
+      an: (2 / M) * an,
+      bn: (2 / M) * bn
+    });
+  }
+}
+
+function drawOriginalData() {
+  stroke(255, 0, 0);
+  strokeWeight(2);
+  noFill();
+  beginShape();
+  for (let point of uploadedData) {
+    let x = map(point.x, 0, uploadedData.length, 0, width);
+    let y = map(point.y, -1, 1, height, 0);
+    vertex(x, y);
+  }
+  endShape();
+}
+
+function drawFourierApproximation(N) {
+  stroke(0, 255, 0);
+  strokeWeight(2);
+  noFill();
+  beginShape();
+  for (let x = 0; x < width; x++) {
+    let fx = 0;
+    let normalizedX = map(x, 0, width, 0, uploadedData.length);
+    fx += coefficients[0].a0;
+    for (let n = 1; n <= N; n++) {
+      let angle = (2 * PI * n * normalizedX) / uploadedData.length;
+      fx += coefficients[n].an * cos(angle) + coefficients[n].bn * sin(angle);
+    }
+    let y = map(fx, -1, 1, height, 0);
+    vertex(x, y);
+  }
+  endShape();
+}

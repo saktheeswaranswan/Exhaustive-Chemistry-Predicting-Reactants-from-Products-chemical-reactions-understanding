@@ -1,0 +1,133 @@
+let coefficientsF = [];
+let surfaceData = [];
+let slider;
+let dataMode = "generated"; // Tracks whether using generated or uploaded data
+
+function setup() {
+  createCanvas(800, 800); // Not needed for plotting, but needed for interface elements
+
+  // Buttons for actions
+  let generateBtn = createButton("Generate and Save Data for Implicit Surface");
+  generateBtn.position(20, height + 20);
+  generateBtn.mousePressed(generateAndSaveSurfaceData);
+
+  let uploadBtn = createFileInput(handleFileUpload);
+  uploadBtn.position(200, height + 20);
+
+  let downloadBtn = createButton("Download Fourier Coefficients and Regression Function (WX Maxima format)");
+  downloadBtn.position(400, height + 20);
+  downloadBtn.mousePressed(downloadFourierAndRegression);
+}
+
+function generateAndSaveSurfaceData() {
+  surfaceData = [];
+  let numPoints = 100;
+  let R = 100, r = 40; // Major and minor radii for the torus
+  for (let i = 0; i < numPoints; i++) {
+    let theta = map(i, 0, numPoints, 0, TWO_PI); // Parametric theta
+    for (let j = 0; j < numPoints; j++) {
+      let phi = map(j, 0, numPoints, 0, TWO_PI); // Parametric phi
+      let x = (R + r * cos(phi)) * cos(theta);
+      let y = (R + r * cos(phi)) * sin(theta); // Calculated y value for the closed surface
+      let z = r * sin(phi);
+
+      // Optionally, modify the y value for visual effect
+      y = y + random(-10, 10); // Adding a small perturbation to y to avoid zeroes (or any custom function)
+
+      surfaceData.push({ x, y, z });
+    }
+  }
+  saveTable(convertDataToTable(surfaceData), "torus_surface_data.csv");
+  dataMode = "generated";
+  computeFourierCoefficients(surfaceData, 50);
+}
+
+function handleFileUpload(file) {
+  if (file.subtype === "csv") {
+    let rows = file.data.split("\n");
+    surfaceData = [];
+    rows.slice(1).forEach(row => {
+      let [x, y, z] = row.split(",").map(Number);
+      if (!isNaN(x) && !isNaN(y) && !isNaN(z)) {
+        surfaceData.push({ x, y, z });
+      }
+    });
+    if (surfaceData.length > 0) {
+      dataMode = "uploaded";
+      computeFourierCoefficients(surfaceData, 50);
+    } else {
+      console.error("Invalid data in the uploaded file.");
+    }
+  } else {
+    console.error("Invalid file format. Please upload a CSV file.");
+  }
+}
+
+function computeFourierCoefficients(data, maxHarmonics) {
+  let N = data.length;
+  coefficientsF = computeImplicitFourier(data.map(p => p.z), N, maxHarmonics);
+}
+
+function computeImplicitFourier(values, N, maxHarmonics) {
+  let coefficients = [];
+  let a0 = values.reduce((sum, val) => sum + val, 0) / N;
+  coefficients.push({ a0, an: [], bn: [] });
+
+  for (let n = 1; n <= maxHarmonics; n++) {
+    let an = 0, bn = 0;
+    for (let k = 0; k < N; k++) {
+      let angle = (2 * PI * n * k) / N;
+      an += values[k] * cos(angle);
+      bn += values[k] * sin(angle);
+    }
+    coefficients.push({
+      an: (2 / N) * an,
+      bn: (2 / N) * bn,
+    });
+  }
+  return coefficients;
+}
+
+function convertDataToTable(data) {
+  let table = new p5.Table();
+  table.addColumn("x");
+  table.addColumn("y");
+  table.addColumn("z");
+  data.forEach(row => {
+    let newRow = table.addRow();
+    newRow.setNum("x", row.x);
+    newRow.setNum("y", row.y);
+    newRow.setNum("z", row.z);
+  });
+  return table;
+}
+
+function downloadFourierAndRegression() {
+  let textContent = "/* Fourier Coefficients and Regression Function for Implicit Surface f(x, y, z) */\n";
+  
+  // Generate implicit function f(x, y, z)
+  let implicitFunction = "f(x, y, z) := " + coefficientsF[0].a0;
+  for (let n = 1; n < coefficientsF.length; n++) {
+    let coef = coefficientsF[n];
+    if (coef.an && coef.bn) {
+      implicitFunction += " + (" + coef.an + " * cos(" + n + " * x) * cos(" + n + " * y) + " + coef.bn + " * sin(" + n + " * x) * sin(" + n + " * y))";
+    }
+  }
+  
+  textContent += implicitFunction + "\n\n";
+  textContent += "/* Fourier Coefficients for Implicit Surface f(x, y, z) */\n";
+  coefficientsF.forEach((coef, n) => {
+    textContent += "a_" + n + " : " + coef.a0 + "\n";
+    if (coef.an && coef.bn) {
+      textContent += "an_" + n + " : " + coef.an + "\n";
+      textContent += "bn_" + n + " : " + coef.bn + "\n";
+    }
+  });
+
+  // Save the file with the correct WX Maxima format
+  let filename = "implicit_surface_fourier_regression_and_coefficients.txt";
+  let file = createWriter(filename);
+  file.write(textContent);
+  file.close();
+  save(filename);
+}

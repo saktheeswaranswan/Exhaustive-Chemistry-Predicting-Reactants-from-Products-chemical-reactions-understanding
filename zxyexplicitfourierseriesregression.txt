@@ -1,0 +1,128 @@
+let generatedData = [];
+let coefficientsZ = [];
+let slider;
+let dataMode = "generated"; // Tracks whether using generated or uploaded data
+
+function setup() {
+  createCanvas(800, 800); // Not needed for plotting, but needed for interface elements
+
+  // Buttons for actions
+  let generateBtn = createButton("Generate and Save Data");
+  generateBtn.position(20, height + 20);
+  generateBtn.mousePressed(generateAndSaveData);
+
+  let uploadBtn = createFileInput(handleFileUpload);
+  uploadBtn.position(200, height + 20);
+
+  let downloadBtn = createButton("Download Fourier Coefficients and Regression Function (WX Maxima format)");
+  downloadBtn.position(400, height + 20);
+  downloadBtn.mousePressed(downloadFourierAndRegression);
+}
+
+function generateAndSaveData() {
+  generatedData = [];
+  let numPoints = 100;
+  let maxX = 400, maxY = 400; // Define max X and Y values for the surface
+  for (let i = 0; i < numPoints; i++) {
+    let x = map(i, 0, numPoints, -maxX, maxX);
+    for (let j = 0; j < numPoints; j++) {
+      let y = map(j, 0, numPoints, -maxY, maxY);
+      let z = 100 * cos(2 * PI * x / maxX) * sin(2 * PI * y / maxY); // Example parametric surface equation for z(x, y)
+      generatedData.push({ x, y, z });
+    }
+  }
+  saveTable(convertDataToTable(generatedData), "parametric_surface_data.csv");
+  dataMode = "generated";
+  computeFourierCoefficients(generatedData, 50);
+}
+
+function handleFileUpload(file) {
+  if (file.subtype === "csv") {
+    let rows = file.data.split("\n");
+    generatedData = [];
+    rows.slice(1).forEach(row => {
+      let [x, y, z] = row.split(",").map(Number);
+      if (!isNaN(x) && !isNaN(y) && !isNaN(z)) {
+        generatedData.push({ x, y, z });
+      }
+    });
+    if (generatedData.length > 0) {
+      dataMode = "uploaded";
+      computeFourierCoefficients(generatedData, 50);
+    } else {
+      console.error("Invalid data in the uploaded file.");
+    }
+  } else {
+    console.error("Invalid file format. Please upload a CSV file.");
+  }
+}
+
+function computeFourierCoefficients(data, maxHarmonics) {
+  let N = data.length;
+
+  coefficientsZ = computeSingleFourier(data.map(p => p.z), N, N, maxHarmonics);
+}
+
+function computeSingleFourier(values, N, T, maxHarmonics) {
+  let coefficients = [];
+  let a0 = values.reduce((sum, val) => sum + val, 0) / N;
+  coefficients.push({ a0, an: [], bn: [] });
+
+  for (let n = 1; n <= maxHarmonics; n++) {
+    let an = 0, bn = 0;
+    for (let k = 0; k < N; k++) {
+      let angle = (2 * PI * n * k) / N;
+      an += values[k] * cos(angle);
+      bn += values[k] * sin(angle);
+    }
+    coefficients.push({
+      an: (2 / N) * an,
+      bn: (2 / N) * bn,
+    });
+  }
+  return coefficients;
+}
+
+function convertDataToTable(data) {
+  let table = new p5.Table();
+  table.addColumn("x");
+  table.addColumn("y");
+  table.addColumn("z");
+  data.forEach(row => {
+    let newRow = table.addRow();
+    newRow.setNum("x", row.x);
+    newRow.setNum("y", row.y);
+    newRow.setNum("z", row.z);
+  });
+  return table;
+}
+
+function downloadFourierAndRegression() {
+  let textContent = "/* Fourier Coefficients and Regression Function for Z(x, y) */\n";
+  
+  // Generate Z(x, y) function
+  let zFunction = "Z(x, y) := " + coefficientsZ[0].a0;
+  for (let n = 1; n < coefficientsZ.length; n++) {
+    let coef = coefficientsZ[n];
+    if (coef.an && coef.bn) {
+      zFunction += " + (" + coef.an + " * cos(" + n + " * x) * cos(" + n + " * y) + " + coef.bn + " * sin(" + n + " * x) * sin(" + n + " * y))";
+    }
+  }
+  
+  textContent += zFunction + "\n\n";
+  textContent += "/* Fourier Coefficients for Z(x, y) */\n";
+  coefficientsZ.forEach((coef, n) => {
+    textContent += "a_" + n + " : " + coef.a0 + "\n";
+    if (coef.an && coef.bn) {
+      textContent += "an_" + n + " : " + coef.an + "\n";
+      textContent += "bn_" + n + " : " + coef.bn + "\n";
+    }
+  });
+
+  // Save the file with the correct WX Maxima format
+  let filename = "fourier_regression_and_coefficients.txt";
+  let file = createWriter(filename);
+  file.write(textContent);
+  file.close();
+  save(filename);
+}

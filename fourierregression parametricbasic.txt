@@ -1,0 +1,203 @@
+let generatedData = [];
+let uploadedData = [];
+let coefficientsX = [];
+let coefficientsY = [];
+let slider;
+let dataMode = "generated"; // Tracks whether using generated or uploaded data
+let tStart = 0;
+let animate = true;
+
+function setup() {
+  createCanvas(800, 800);
+  let generateBtn = createButton("Generate and Save Data");
+  generateBtn.position(20, height + 20);
+  generateBtn.mousePressed(generateAndSaveData);
+
+  let uploadBtn = createFileInput(handleFileUpload);
+  uploadBtn.position(200, height + 20);
+
+  let downloadBtn = createButton("Download Fourier Regression Functions (WX Maxima format)");
+  downloadBtn.position(400, height + 20);
+  downloadBtn.mousePressed(downloadFourierAndRegression);
+
+  slider = createSlider(1, 50, 10, 1);
+  slider.position(600, height + 20);
+  textSize(16);
+}
+
+function draw() {
+  background(30);
+  fill(255);
+  text("Fourier Regression for Parametric Curve", 20, 30);
+
+  if ((dataMode === "generated" && generatedData.length > 0) || 
+      (dataMode === "uploaded" && uploadedData.length > 0)) {
+    text("Harmonics: " + slider.value(), 20, 60);
+
+    // Draw the original parametric curve data
+    drawOriginalData();
+
+    // Animate the Fourier approximation curve and overlay it clearly
+    drawFourierApproximation(slider.value());
+
+    // Increment for smooth animation
+    if (animate) {
+      tStart += 0.02;
+      if (tStart > TWO_PI) tStart = 0; // Loop the time parameter for animation
+    }
+  } else {
+    text("Generate data or upload a CSV file with 't,x,y' columns.", 20, 60);
+  }
+}
+
+function generateAndSaveData() {
+  generatedData = [];
+  let numPoints = 100;
+  for (let i = 0; i < numPoints; i++) {
+    let t = i * (TWO_PI / numPoints);
+    let x = 200 + 150 * cos(3 * t); // Parametric equation for x
+    let y = 200 + 150 * sin(5 * t); // Parametric equation for y
+    generatedData.push({ t, x, y });
+  }
+  saveTable(convertDataToTable(generatedData), "parametric_data.csv");
+  dataMode = "generated";
+  computeFourierCoefficients(generatedData, 50);
+}
+
+function handleFileUpload(file) {
+  if (file.subtype === "csv") {
+    let rows = file.data.split("\n");
+    uploadedData = [];
+    rows.slice(1).forEach(row => {
+      let [t, x, y] = row.split(",").map(Number);
+      if (!isNaN(t) && !isNaN(x) && !isNaN(y)) {
+        uploadedData.push({ t, x, y });
+      }
+    });
+    if (uploadedData.length > 0) {
+      dataMode = "uploaded";
+      computeFourierCoefficients(uploadedData, 50);
+    } else {
+      console.error("Invalid data in the uploaded file.");
+    }
+  } else {
+    console.error("Invalid file format. Please upload a CSV file.");
+  }
+}
+
+function computeFourierCoefficients(data, maxHarmonics) {
+  let N = data.length;
+  let T = data[data.length - 1].t - data[0].t;
+
+  coefficientsX = computeSingleFourier(data.map(p => p.x), N, T, maxHarmonics);
+  coefficientsY = computeSingleFourier(data.map(p => p.y), N, T, maxHarmonics);
+}
+
+function computeSingleFourier(values, N, T, maxHarmonics) {
+  let coefficients = [];
+  let a0 = values.reduce((sum, val) => sum + val, 0) / N;
+  coefficients.push({ a0, an: [], bn: [] });
+
+  for (let n = 1; n <= maxHarmonics; n++) {
+    let an = 0, bn = 0;
+    for (let k = 0; k < N; k++) {
+      let angle = (2 * PI * n * k) / N;
+      an += values[k] * cos(angle);
+      bn += values[k] * sin(angle);
+    }
+    coefficients.push({
+      an: (2 / N) * an,
+      bn: (2 / N) * bn,
+    });
+  }
+  return coefficients;
+}
+
+function drawOriginalData() {
+  let data = dataMode === "generated" ? generatedData : uploadedData;
+  stroke(255, 0, 0, 150); // Red for original data with transparency
+  strokeWeight(2);
+  noFill();
+  beginShape();
+  for (let pt of data) {
+    let x = map(pt.x, 0, width, 0, width);
+    let y = map(pt.y, 0, height, height, 0);
+    vertex(x, y);
+  }
+  endShape();
+}
+
+function drawFourierApproximation(harmonics) {
+  let data = dataMode === "generated" ? generatedData : uploadedData;
+  stroke(0, 255, 0, 150); // Green for Fourier approximation with transparency
+  strokeWeight(3); // Slightly thicker line for the approximation
+  noFill();
+  beginShape();
+
+  // Loop through time parameter `tStart` for animation effect
+  for (let tIndex = 0; tIndex < data.length; tIndex++) {
+    let t = data[tIndex].t + tStart;
+    let x = computeFourierValue(coefficientsX, harmonics, t, data.length);
+    let y = computeFourierValue(coefficientsY, harmonics, t, data.length);
+    vertex(x, y);
+  }
+  endShape();
+}
+
+function computeFourierValue(coefficients, harmonics, t, N) {
+  let T = TWO_PI; // Assume periodic interval
+  let sum = coefficients[0].a0;
+  for (let n = 1; n <= harmonics; n++) {
+    let angle = (2 * PI * n * t) / T;
+    sum += coefficients[n].an * cos(angle) + coefficients[n].bn * sin(angle);
+  }
+  return sum;
+}
+
+function convertDataToTable(data) {
+  let table = new p5.Table();
+  table.addColumn("t");
+  table.addColumn("x");
+  table.addColumn("y");
+  data.forEach(row => {
+    let newRow = table.addRow();
+    newRow.setNum("t", row.t);
+    newRow.setNum("x", row.x);
+    newRow.setNum("y", row.y);
+  });
+  return table;
+}
+
+// Updated function to download only X(t) and Y(t)
+function downloadFourierAndRegression() {
+  let textContent = `/* Fourier Regression Functions for X(t) and Y(t) */\n`;
+
+  // X(t) Function
+  let xFunction = `X(t) := ${coefficientsX[0].a0}`;
+  for (let n = 1; n < coefficientsX.length; n++) {
+    let coef = coefficientsX[n];
+    if (coef.an && coef.bn) {
+      xFunction += ` + (${coef.an} * cos(${n} * t) + ${coef.bn} * sin(${n} * t))`;
+    }
+  }
+
+  textContent += `X(t) := ${xFunction}\n\n`;
+
+  // Y(t) Function
+  let yFunction = `Y(t) := ${coefficientsY[0].a0}`;
+  for (let n = 1; n < coefficientsY.length; n++) {
+    let coef = coefficientsY[n];
+    if (coef.an && coef.bn) {
+      yFunction += ` + (${coef.an} * cos(${n} * t) + ${coef.bn} * sin(${n} * t))`;
+    }
+  }
+
+  textContent += `Y(t) := ${yFunction}\n`;
+
+  // Save the file with the WX Maxima format
+  let filename = "fourier_regression_functions.wx";
+  let file = createWriter(filename);
+  file.write(textContent);
+  file.close();
+  save(filename);
+}

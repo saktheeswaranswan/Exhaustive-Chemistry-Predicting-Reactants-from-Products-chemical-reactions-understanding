@@ -1,0 +1,289 @@
+let generatedData1 = [];
+let generatedData2 = [];
+let uploadedData1 = [];
+let uploadedData2 = [];
+let coefficientsX1 = [];
+let coefficientsY1 = [];
+let coefficientsX2 = [];
+let coefficientsY2 = [];
+let slider;
+let dataMode = "generated"; // Tracks whether using generated or uploaded data
+let tStart = 0;
+let animate = true;
+let morphFactor = 0;
+
+function setup() {
+  createCanvas(800, 800);
+  let generateBtn1 = createButton("Generate and Save Data Set 1");
+  generateBtn1.position(20, height + 20);
+  generateBtn1.mousePressed(generateAndSaveData1);
+
+  let generateBtn2 = createButton("Generate and Save Data Set 2");
+  generateBtn2.position(200, height + 20);
+  generateBtn2.mousePressed(generateAndSaveData2);
+
+  let uploadBtn1 = createFileInput(handleFileUpload1);
+  uploadBtn1.position(400, height + 20);
+  let uploadBtn2 = createFileInput(handleFileUpload2);
+  uploadBtn2.position(600, height + 20);
+
+  let downloadBtn = createButton("Download Fourier Regression Functions (WX Maxima format)");
+  downloadBtn.position(800, height + 20);
+  downloadBtn.mousePressed(downloadFourierAndRegression);
+
+  slider = createSlider(0, 1, 0, 0.01);
+  slider.position(1000, height + 20);
+  textSize(16);
+}
+
+function draw() {
+  background(30);
+  fill(255);
+  text("Fourier Regression for Parametric Curve", 20, 30);
+
+  if ((dataMode === "generated" && generatedData1.length > 0 && generatedData2.length > 0) || 
+      (dataMode === "uploaded" && uploadedData1.length > 0 && uploadedData2.length > 0)) {
+    text("Morph Factor: " + slider.value().toFixed(2), 20, 60);
+
+    // Draw the original parametric curve data
+    drawOriginalData1();
+    drawOriginalData2();
+
+    // Draw the Fourier approximation curves and morph them
+    drawFourierApproximation(coefficientsX1, coefficientsY1, coefficientsX2, coefficientsY2, slider.value());
+
+    // Increment for smooth animation
+    if (animate) {
+      tStart += 0.02;
+      if (tStart > TWO_PI) tStart = 0; // Loop the time parameter for animation
+    }
+  } else {
+    text("Generate data or upload two CSV files with 't,x,y' columns.", 20, 60);
+  }
+}
+
+function generateAndSaveData1() {
+  generatedData1 = [];
+  let numPoints = 100;
+  for (let i = 0; i < numPoints; i++) {
+    let t = i * (TWO_PI / numPoints);
+    let x = 200 + 150 * cos(3 * t); // Parametric equation for x
+    let y = 200 + 150 * sin(5 * t); // Parametric equation for y
+    generatedData1.push({ t, x, y });
+  }
+  saveTable(convertDataToTable(generatedData1), "parametric_data1.csv");
+  dataMode = "generated";
+  computeFourierCoefficients(generatedData1, 50, 1);
+}
+
+function generateAndSaveData2() {
+  generatedData2 = [];
+  let numPoints = 100;
+  for (let i = 0; i < numPoints; i++) {
+    let t = i * (TWO_PI / numPoints);
+    let x = 200 + 150 * cos(5 * t); // Different parametric equation for x
+    let y = 200 + 150 * sin(3 * t); // Different parametric equation for y
+    generatedData2.push({ t, x, y });
+  }
+  saveTable(convertDataToTable(generatedData2), "parametric_data2.csv");
+  dataMode = "generated";
+  computeFourierCoefficients(generatedData2, 50, 2);
+}
+
+function handleFileUpload1(file) {
+  if (file.subtype === "csv") {
+    let rows = file.data.split("\n");
+    uploadedData1 = [];
+    rows.slice(1).forEach(row => {
+      let [t, x, y] = row.split(",").map(Number);
+      if (!isNaN(t) && !isNaN(x) && !isNaN(y)) {
+        uploadedData1.push({ t, x, y });
+      }
+    });
+    if (uploadedData1.length > 0) {
+      dataMode = "uploaded";
+      computeFourierCoefficients(uploadedData1, 50, 1);
+    } else {
+      console.error("Invalid data in the uploaded file.");
+    }
+  }
+}
+
+function handleFileUpload2(file) {
+  if (file.subtype === "csv") {
+    let rows = file.data.split("\n");
+    uploadedData2 = [];
+    rows.slice(1).forEach(row => {
+      let [t, x, y] = row.split(",").map(Number);
+      if (!isNaN(t) && !isNaN(x) && !isNaN(y)) {
+        uploadedData2.push({ t, x, y });
+      }
+    });
+    if (uploadedData2.length > 0) {
+      dataMode = "uploaded";
+      computeFourierCoefficients(uploadedData2, 50, 2);
+    } else {
+      console.error("Invalid data in the uploaded file.");
+    }
+  }
+}
+
+function computeFourierCoefficients(data, maxHarmonics, setNumber) {
+  let N = data.length;
+  let T = data[data.length - 1].t - data[0].t;
+
+  if (setNumber === 1) {
+    coefficientsX1 = computeSingleFourier(data.map(p => p.x), N, T, maxHarmonics);
+    coefficientsY1 = computeSingleFourier(data.map(p => p.y), N, T, maxHarmonics);
+  } else if (setNumber === 2) {
+    coefficientsX2 = computeSingleFourier(data.map(p => p.x), N, T, maxHarmonics);
+    coefficientsY2 = computeSingleFourier(data.map(p => p.y), N, T, maxHarmonics);
+  }
+}
+
+function computeSingleFourier(values, N, T, maxHarmonics) {
+  let coefficients = [];
+  let a0 = values.reduce((sum, val) => sum + val, 0) / N;
+  coefficients.push({ a0, an: [], bn: [] });
+
+  for (let n = 1; n <= maxHarmonics; n++) {
+    let an = 0, bn = 0;
+    for (let k = 0; k < N; k++) {
+      let angle = (2 * PI * n * k) / N;
+      an += values[k] * cos(angle);
+      bn += values[k] * sin(angle);
+    }
+    coefficients.push({
+      an: (2 / N) * an,
+      bn: (2 / N) * bn,
+    });
+  }
+  return coefficients;
+}
+
+function drawOriginalData1() {
+  let data = dataMode === "generated" ? generatedData1 : uploadedData1;
+  stroke(255, 0, 0, 150); // Red for original data with transparency
+  strokeWeight(2);
+  noFill();
+  beginShape();
+  for (let pt of data) {
+    let x = map(pt.x, 0, width, 0, width);
+    let y = map(pt.y, 0, height, height, 0);
+    vertex(x, y);
+  }
+  endShape();
+}
+
+function drawOriginalData2() {
+  let data = dataMode === "generated" ? generatedData2 : uploadedData2;
+  stroke(0, 0, 255, 150); // Blue for original data with transparency
+  strokeWeight(2);
+  noFill();
+  beginShape();
+  for (let pt of data) {
+    let x = map(pt.x, 0, width, 0, width);
+    let y = map(pt.y, 0, height, height, 0);
+    vertex(x, y);
+  }
+  endShape();
+}
+
+function drawFourierApproximation(coefficientsX1, coefficientsY1, coefficientsX2, coefficientsY2, morphFactor) {
+  let data = dataMode === "generated" ? generatedData1 : uploadedData1;
+  stroke(0, 255, 0, 150); // Green for Fourier approximation with transparency
+  strokeWeight(3); // Slightly thicker line for the approximation
+  noFill();
+  beginShape();
+
+  // Loop through time parameter `tStart` for animation effect
+  for (let tIndex = 0; tIndex < data.length; tIndex++) {
+    let t = data[tIndex].t + tStart;
+    let x1 = computeFourierValue(coefficientsX1, 50, t, data.length);
+    let y1 = computeFourierValue(coefficientsY1, 50, t, data.length);
+    let x2 = computeFourierValue(coefficientsX2, 50, t, data.length);
+    let y2 = computeFourierValue(coefficientsY2, 50, t, data.length);
+
+    // Interpolate between the two data sets
+    let x = lerp(x1, x2, morphFactor);
+    let y = lerp(y1, y2, morphFactor);
+
+    vertex(x, y);
+  }
+  endShape();
+}
+
+function computeFourierValue(coefficients, harmonics, t, N) {
+  let T = TWO_PI; // Assume periodic interval
+  let sum = coefficients[0].a0;
+  for (let n = 1; n <= harmonics; n++) {
+    let angle = (2 * PI * n * t) / T;
+    sum += coefficients[n].an * cos(angle) + coefficients[n].bn * sin(angle);
+  }
+  return sum;
+}
+
+function convertDataToTable(data) {
+  let table = new p5.Table();
+  table.addColumn("t");
+  table.addColumn("x");
+  table.addColumn("y");
+  data.forEach(row => {
+    let newRow = table.addRow();
+    newRow.setNum("t", row.t);
+    newRow.setNum("x", row.x);
+    newRow.setNum("y", row.y);
+  });
+  return table;
+}
+
+function downloadFourierAndRegression() {
+  let textContent = `/* Fourier Regression Functions for X(t) and Y(t) */\n`;
+
+  // X(t) Function for first dataset
+  let xFunction1 = `X1(t) := ${coefficientsX1[0].a0}`;
+  for (let n = 1; n < coefficientsX1.length; n++) {
+    let coef = coefficientsX1[n];
+    if (coef.an && coef.bn) {
+      xFunction1 += ` + (${coef.an} * cos(${n} * t) + ${coef.bn} * sin(${n} * t))`;
+    }
+  }
+  textContent += `X1(t) := ${xFunction1}\n\n`;
+
+  // Y(t) Function for first dataset
+  let yFunction1 = `Y1(t) := ${coefficientsY1[0].a0}`;
+  for (let n = 1; n < coefficientsY1.length; n++) {
+    let coef = coefficientsY1[n];
+    if (coef.an && coef.bn) {
+      yFunction1 += ` + (${coef.an} * cos(${n} * t) + ${coef.bn} * sin(${n} * t))`;
+    }
+  }
+  textContent += `Y1(t) := ${yFunction1}\n\n`;
+
+  // X(t) Function for second dataset
+  let xFunction2 = `X2(t) := ${coefficientsX2[0].a0}`;
+  for (let n = 1; n < coefficientsX2.length; n++) {
+    let coef = coefficientsX2[n];
+    if (coef.an && coef.bn) {
+      xFunction2 += ` + (${coef.an} * cos(${n} * t) + ${coef.bn} * sin(${n} * t))`;
+    }
+  }
+  textContent += `X2(t) := ${xFunction2}\n\n`;
+
+  // Y(t) Function for second dataset
+  let yFunction2 = `Y2(t) := ${coefficientsY2[0].a0}`;
+  for (let n = 1; n < coefficientsY2.length; n++) {
+    let coef = coefficientsY2[n];
+    if (coef.an && coef.bn) {
+      yFunction2 += ` + (${coef.an} * cos(${n} * t) + ${coef.bn} * sin(${n} * t))`;
+    }
+  }
+  textContent += `Y2(t) := ${yFunction2}\n`;
+
+  // Save the file with the WX Maxima format
+  let filename = "fourier_regression_functions.wx";
+  let file = createWriter(filename);
+  file.write(textContent);
+  file.close();
+  save(filename);
+}
